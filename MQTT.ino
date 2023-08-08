@@ -17,7 +17,7 @@ const char* password = "";
 //const char* mqtt_server = "192.168.1.144";
 const char* mqtt_server = "7179422ab76b4c6d8ecaa4a5dcfc530b.s2.eu.hivemq.cloud";
 const char* mqtt_username = "testeESP32"; // replace with your Credential
-const char* mqtt_password = "";
+const char* mqtt_password = "Esp321234";
 const int mqtt_port = 8883;
 
 WiFiClientSecure espClient;
@@ -69,6 +69,7 @@ emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
 
 #define DHTPIN 14 
 #define DHTTYPE DHT22 
+#define CONNECTION_TIMEOUT 10
 DHT dht(DHTPIN, DHTTYPE);
 
 //Adafruit_BME280 bme; // I2C
@@ -94,18 +95,19 @@ void setup() {
 }
 
 void setup_wifi() {
-  delay(10);
-  // We start by connecting to a WiFi network
-  Serial.println();
-  Serial.print("Connecting to ");
-  Serial.println(ssid);
+  WiFi.mode(WIFI_STA); //Optional
+    WiFi.begin(ssid, password);
+    Serial.println("\nConnecting");
+    int timeout_counter = 0;
 
-  WiFi.begin(ssid, password);
-
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
+    while(WiFi.status() != WL_CONNECTED){
+        Serial.print(".");
+        delay(200);
+        timeout_counter++;
+        if(timeout_counter >= CONNECTION_TIMEOUT*5){
+        ESP.restart();
+        }
+    }
   Serial.println("");
   Serial.println("WiFi connected");
   Serial.println("IP address: ");
