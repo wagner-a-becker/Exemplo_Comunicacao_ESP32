@@ -78,8 +78,6 @@ OneWire oneWire(oneWireBus);
 DallasTemperature sensors(&oneWire);
 String macAddress;
 bool isConnected = false;
-//char* Message = "false";
-//char* Topic = "false";
 
 
 void setup() {
@@ -167,27 +165,6 @@ bool publishMacAddress() {
   // Envie o endereço MAC para o tópico CONFIG/Connect
   return client.publish("CONFIG/Connect", macAddress.c_str());
 }
-
-/*bool waitForConfirmation() {
-  unsigned long startTime = millis();
-
-  while (millis() - startTime < 600000) {  // Aguarde por até 60 segundos
-    client.loop();
-
-    // Verifique se a mensagem de confirmação "yes" foi recebida
-    if (client.connected()) {
-      client.subscribe("CONFIG/Connected");
-      if (Topic == "CONFIG/Connected" && Message == "yes") {
-        isConnected = true; // Defina o estado de conexão como true
-        return true; // Confirmação recebida com sucesso
-      }
-    }
-
-    delay(1000); // Aguarde 1 segundo antes de verificar novamente
-  }
-  Serial.println("Falha ao se conectar com a API");
-  return false; // Tempo limite de espera atingido
-}*/
 
 void publishLocalTime() {
   struct tm timeinfo;
