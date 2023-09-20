@@ -76,6 +76,10 @@ DHT dht(DHTPIN, DHTTYPE);
 const int oneWireBus = 13;
 OneWire oneWire(oneWireBus);
 DallasTemperature sensors(&oneWire);
+String macAddress;
+bool isConnected = false;
+//char* Message = "false";
+//char* Topic = "false";
 
 
 void setup() {
@@ -90,6 +94,7 @@ void setup() {
   client.setCallback(callback);
   dht.begin();
   configTime(UTC_OFFSET, UTC_OFFSET_DST, NTP_SERVER);
+  macAddress = WiFi.macAddress();
 }
 
 void setup_wifi() {
@@ -123,22 +128,16 @@ void callback(char* topic, byte* message, unsigned int length) {
     messageTemp += (char)message[i];
   }
   Serial.println();
-
   // Feel free to add more if statements to control more GPIOs with MQTT
-
   // If a message is received on the topic esp32/output, you check if the message is either "on" or "off". 
   // Changes the output state according to the message
-  if (String(topic) == "esp32/output") {
+  if (String(topic) == "CONFIG/Connected") {
     Serial.print("Changing output to ");
-    if(messageTemp == "on"){
-      Serial.println("on");
-    }
-    else if(messageTemp == "off"){
-      Serial.println("off");
+    if(messageTemp == "yes"){
+      Serial.println("Connected to API");
+      isConnected = true;
     }
   }
-
-  
 }
 
 void reconnect() {
@@ -152,8 +151,8 @@ void reconnect() {
       Serial.println("connected");
 
       //SUBSCRIBE TO TOPIC HERE
-
-     client.subscribe("esp32/output");
+      client.subscribe("CONFIG/Connected");
+     
 
     } else {
       Serial.print("failed, rc=");
@@ -164,7 +163,33 @@ void reconnect() {
   }
 }
 
-void printLocalTime() {
+bool publishMacAddress() {
+  // Envie o endereço MAC para o tópico CONFIG/Connect
+  return client.publish("CONFIG/Connect", macAddress.c_str());
+}
+
+/*bool waitForConfirmation() {
+  unsigned long startTime = millis();
+
+  while (millis() - startTime < 600000) {  // Aguarde por até 60 segundos
+    client.loop();
+
+    // Verifique se a mensagem de confirmação "yes" foi recebida
+    if (client.connected()) {
+      client.subscribe("CONFIG/Connected");
+      if (Topic == "CONFIG/Connected" && Message == "yes") {
+        isConnected = true; // Defina o estado de conexão como true
+        return true; // Confirmação recebida com sucesso
+      }
+    }
+
+    delay(1000); // Aguarde 1 segundo antes de verificar novamente
+  }
+  Serial.println("Falha ao se conectar com a API");
+  return false; // Tempo limite de espera atingido
+}*/
+
+void publishLocalTime() {
   struct tm timeinfo;
   if (!getLocalTime(&timeinfo)) {
     Serial.print("Connection Err");
@@ -180,7 +205,6 @@ void printLocalTime() {
   sprintf(dataHora, "%02d/%02d/%04d %02d:%02d:%02d", dia, mes, ano, hora, min, seg);
 
   char* stime = "/dataHora";
-  String macAddress = WiFi.macAddress();
 
   /// -------------------------------------
   // |Prepara o tópico do Tempo| 
@@ -198,54 +222,16 @@ void printLocalTime() {
   Serial.println(&timeinfo, "%H:%M:%S");
 }
 
-
-void loop() {
-  if (!client.connected()) {
-    reconnect();
-  }
-  client.loop();
-
-  struct tm timecalc;
-  if (!getLocalTime(&timecalc)) {
-    Serial.print("Not Connected to NTP");
-    return;
-  }
-  int min = timecalc.tm_min;
-  static bool executedThisMinute = false;
-
-  if (min % 2 == 0 && !executedThisMinute) {
-    executedThisMinute = true;
-
-    /*long now = millis();
-    if (now - lastMsg > 1000) {
-      lastMsg = now;*/
-    
-    /// ------------------------------------------------------
-    // |Lê o sensor DHT22(Temp./Hum. do Ar) e prepara os valores| 
-    /// ------------------------------------------------------
+void publishDHT22() {
     float ah = dht.readHumidity();
-    // Read temperature as Celsius (the default)
     float at = dht.readTemperature();
-
-    char tempArString[8];
-    dtostrf(at, 1, 2, tempArString);
-    char humArString[8];
-    dtostrf(ah, 1, 2, humArString);
-
-    /// -------------------------------------------------------
-    // |Lê o sensor BS18B20(Temp. do Solo) e prepara os valores| 
-    /// -------------------------------------------------------
-    sensors.requestTemperatures(); 
-    float st = sensors.getTempCByIndex(0);
-
-    char tempSoloString[8];
-    dtostrf(st, 1, 2, tempSoloString);
-
-    ///---------------------------------------
     char* sta = "/sensorTemperaturaAr";
     char* sha = "/sensorHumidadeAr";
-    char* sts = "/sensorTemperaturaSolo";
-    String macAddress = WiFi.macAddress();
+    char tempArString[8];
+    char humArString[8];
+
+    dtostrf(at, 1, 2, tempArString);
+    dtostrf(ah, 1, 2, humArString);
 
     /// -------------------------------------
     // |Prepara o tópico da TEMPERATURA DO AR| 
@@ -269,6 +255,24 @@ void loop() {
     strcpy(ha, macAddress.c_str());
     strcat(ha, sha);
 
+    client.publish(ta, tempArString);
+    client.publish(ha, humArString);
+    Serial.print(ta);
+    Serial.print("/");
+    Serial.println(tempArString);
+    Serial.print(ha);
+    Serial.print("/");
+    Serial.println(humArString);
+}
+
+void publishBS18B20() {
+    sensors.requestTemperatures(); 
+    float st = sensors.getTempCByIndex(0);
+    char tempSoloString[8];
+    char* sts = "/sensorTemperaturaSolo";
+
+    dtostrf(st, 1, 2, tempSoloString);
+
     /// ---------------------------------------
     // |Prepara o tópico da Temperatura do Solo| 
     /// ---------------------------------------
@@ -280,25 +284,50 @@ void loop() {
     strcpy(ts, macAddress.c_str());
     strcat(ts, sts);
 
-    /// ------------------------------------
-    // |Faz as publicações, e printa na tela| 
-    /// ------------------------------------
-
-    printLocalTime();
-    client.publish(ta, tempArString);
-    client.publish(ha, humArString);
     client.publish(ts, tempSoloString);
-    Serial.print(ta);
-    Serial.print("/");
-    Serial.println(tempArString);
-    Serial.print(ha);
-    Serial.print("/");
-    Serial.println(humArString);
     Serial.print(ts);
     Serial.print("/");
     Serial.println(tempSoloString);
 
-  } else if  (min % 2 != 0) {
-    executedThisMinute = false;  // Redefina a variável para permitir a execução no próximo minuto par
+} 
+
+
+void loop() {
+  if (!client.connected()) {
+    reconnect();
+  }
+  client.loop();
+
+  // Enviar o endereço MAC apenas se a ESP32 estiver conectada
+  if (!isConnected && client.connected() && publishMacAddress()) {
+    Serial.println("Endereço MAC enviado com sucesso");
+    delay(6000);
+  }
+  if (isConnected) {
+    // Executar rotinas enquanto estiver conectado
+    struct tm timecalc;
+    if (!getLocalTime(&timecalc)) {
+      Serial.print("Not Connected to NTP");
+      return;
+    }
+    int min = timecalc.tm_min;
+    static bool executedThisMinute = false;
+
+    if (min % 2 == 0 && !executedThisMinute) {
+      executedThisMinute = true;
+
+      publishLocalTime();
+      publishDHT22();
+      publishBS18B20();
+      
+    } else if  (min % 2 != 0) {
+      executedThisMinute = false;  // Redefina a variável para permitir a execução no próximo minuto par
+    }
+
+    // Verifique se a conexão MQTT foi perdida ou o Wi-Fi desconectado
+    if (!client.connected() || WiFi.status() != WL_CONNECTED) {
+      isConnected = false; // Defina o estado de conexão como false
+      Serial.println("Conexão MQTT ou Wi-Fi perdida. Reconectando...");
+    }
   }
 }
