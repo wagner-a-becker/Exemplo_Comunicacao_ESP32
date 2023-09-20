@@ -8,16 +8,19 @@
 #include <Wire.h>
 #include "DHT.h"
 #include <Adafruit_Sensor.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
+
 
 // Replace the next variables with your SSID/Password combination
-const char* ssid = "";
-const char* password = "";
+const char* ssid = "iPhone";
+const char* password = "eae200111";
 
 // Add your MQTT Broker IP address, example:
 //const char* mqtt_server = "192.168.1.144";
 const char* mqtt_server = "7179422ab76b4c6d8ecaa4a5dcfc530b.s2.eu.hivemq.cloud";
-const char* mqtt_username = "testeESP32"; // replace with your Credential
-const char* mqtt_password = "Esp321234";
+const char* mqtt_username = "Embarcado"; // replace with your Credential
+const char* mqtt_password = "Embarcado2023";
 const int mqtt_port = 8883;
 
 WiFiClientSecure espClient;
@@ -25,6 +28,7 @@ PubSubClient client(espClient);
 long lastMsg = 0;
 char msg[50];
 int value = 0;
+
 
 static const char *root_ca PROGMEM = R"EOF(
 -----BEGIN CERTIFICATE-----
@@ -60,24 +64,19 @@ emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
 -----END CERTIFICATE-----
 )EOF";
 
-//uncomment the following lines if you're using SPI
-/*#include <SPI.h>
-#define BME_SCK 18
-#define BME_MISO 19
-#define BME_MOSI 23
-#define BME_CS 5*/
 
 #define DHTPIN 14 
 #define DHTTYPE DHT22 
 #define CONNECTION_TIMEOUT 10
+#define NTP_SERVER     "pool.ntp.org"
+#define UTC_OFFSET     -10800
+#define UTC_OFFSET_DST 0
+
 DHT dht(DHTPIN, DHTTYPE);
+const int oneWireBus = 13;
+OneWire oneWire(oneWireBus);
+DallasTemperature sensors(&oneWire);
 
-//Adafruit_BME280 bme; // I2C
-//Adafruit_BME280 bme(BME_CS); // hardware SPI
-//Adafruit_BME280 bme(BME_CS, BME_MOSI, BME_MISO, BME_SCK); // software SPI
-
-// LED Pin
-const int ledPin = 4;
 
 void setup() {
   Serial.begin(115200);
@@ -90,8 +89,7 @@ void setup() {
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(callback);
   dht.begin();
-  
-  pinMode(ledPin, OUTPUT);
+  configTime(UTC_OFFSET, UTC_OFFSET_DST, NTP_SERVER);
 }
 
 void setup_wifi() {
@@ -134,13 +132,13 @@ void callback(char* topic, byte* message, unsigned int length) {
     Serial.print("Changing output to ");
     if(messageTemp == "on"){
       Serial.println("on");
-      digitalWrite(ledPin, HIGH);
     }
     else if(messageTemp == "off"){
       Serial.println("off");
-      digitalWrite(ledPin, LOW);
     }
   }
+
+  
 }
 
 void reconnect() {
@@ -165,52 +163,142 @@ void reconnect() {
     }
   }
 }
+
+void printLocalTime() {
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    Serial.print("Connection Err");
+    return;
+  }
+  int hora = timeinfo.tm_hour;
+  int min = timeinfo.tm_min;
+  int seg = timeinfo.tm_sec;
+  int dia = timeinfo.tm_mday;
+  int mes = timeinfo.tm_mon + 1;
+  int ano = timeinfo.tm_year + 1900;
+  char dataHora[20];
+  sprintf(dataHora, "%02d/%02d/%04d %02d:%02d:%02d", dia, mes, ano, hora, min, seg);
+
+  char* stime = "/dataHora";
+  String macAddress = WiFi.macAddress();
+
+  /// -------------------------------------
+  // |Prepara o tópico do Tempo| 
+  /// -------------------------------------
+  // Determine o tamanho necessário para a string resultante
+  int stimeSize = macAddress.length() + strlen(stime) + 1; // +1 para o caractere nulo
+  // Aloque memória para a string resultante
+  char* time = new char[stimeSize];
+  // Copie o endereço MAC e a parte "/sensorTemperaturaAr" para a string ta
+  strcpy(time, macAddress.c_str());
+  strcat(time, stime);
+  client.publish(time, dataHora);
+
+  Serial.print(&timeinfo, "%d/%m/%Y  ");
+  Serial.println(&timeinfo, "%H:%M:%S");
+}
+
+
 void loop() {
   if (!client.connected()) {
     reconnect();
   }
   client.loop();
 
-  long now = millis();
-  if (now - lastMsg > 60000) {
-    lastMsg = now;
-    
-  float h = dht.readHumidity();
-  // Read temperature as Celsius (the default)
-  float t = dht.readTemperature();
-  // Read temperature as Fahrenheit (isFahrenheit = true)
-  float f = dht.readTemperature(true);
-
-  // Check if any reads failed and exit early (to try again).
-  if (isnan(h) || isnan(t) || isnan(f)) {
-    Serial.println(F("Failed to read from DHT sensor!"));
+  struct tm timecalc;
+  if (!getLocalTime(&timecalc)) {
+    Serial.print("Not Connected to NTP");
     return;
   }
+  int min = timecalc.tm_min;
+  static bool executedThisMinute = false;
 
-  // Compute heat index in Fahrenheit (the default)
-  float hif = dht.computeHeatIndex(f, h);
-  // Compute heat index in Celsius (isFahreheit = false)
-  float hic = dht.computeHeatIndex(t, h, false);
+  if (min % 2 == 0 && !executedThisMinute) {
+    executedThisMinute = true;
 
-  char tempString[8];
-  dtostrf(t, 1, 2, tempString);
-  char humString[8];
-  dtostrf(h, 1, 2, humString);
-  char wifiString[10] = "Conectado";
-  client.publish("esp32/temperature", tempString);
-  client.publish("esp32/humidity", humString);
-  //client.publish("esp32/wifistate", wifiString);
+    /*long now = millis();
+    if (now - lastMsg > 1000) {
+      lastMsg = now;*/
+    
+    /// ------------------------------------------------------
+    // |Lê o sensor DHT22(Temp./Hum. do Ar) e prepara os valores| 
+    /// ------------------------------------------------------
+    float ah = dht.readHumidity();
+    // Read temperature as Celsius (the default)
+    float at = dht.readTemperature();
 
-  Serial.print(F("Humidity: "));
-  Serial.print(h);
-  Serial.print(F("%  Temperature: "));
-  Serial.print(t);
-  Serial.print(F("°C "));
-  Serial.print(f);
-  Serial.print(F("°F  Heat index: "));
-  Serial.print(hic);
-  Serial.print(F("°C "));
-  Serial.print(hif);
-  Serial.println(F("°F"));
+    char tempArString[8];
+    dtostrf(at, 1, 2, tempArString);
+    char humArString[8];
+    dtostrf(ah, 1, 2, humArString);
+
+    /// -------------------------------------------------------
+    // |Lê o sensor BS18B20(Temp. do Solo) e prepara os valores| 
+    /// -------------------------------------------------------
+    sensors.requestTemperatures(); 
+    float st = sensors.getTempCByIndex(0);
+
+    char tempSoloString[8];
+    dtostrf(st, 1, 2, tempSoloString);
+
+    ///---------------------------------------
+    char* sta = "/sensorTemperaturaAr";
+    char* sha = "/sensorHumidadeAr";
+    char* sts = "/sensorTemperaturaSolo";
+    String macAddress = WiFi.macAddress();
+
+    /// -------------------------------------
+    // |Prepara o tópico da TEMPERATURA DO AR| 
+    /// -------------------------------------
+    // Determine o tamanho necessário para a string resultante
+    int taSize = macAddress.length() + strlen(sta) + 1; // +1 para o caractere nulo
+    // Aloque memória para a string resultante
+    char* ta = new char[taSize];
+    // Copie o endereço MAC e a parte "/sensorTemperaturaAr" para a string ta
+    strcpy(ta, macAddress.c_str());
+    strcat(ta, sta);
+    
+    /// -------------------------------------
+    // |Prepara o tópico da HUMIDADE DO AR| 
+    /// -------------------------------------
+    // Determine o tamanho necessário para a string resultante
+    int haSize = macAddress.length() + strlen(sha) + 1; // +1 para o caractere nulo
+    // Aloque memória para a string resultante
+    char* ha = new char[haSize];
+    // Copie o endereço MAC e a parte "/sensorHumidadeAr" para a string ha
+    strcpy(ha, macAddress.c_str());
+    strcat(ha, sha);
+
+    /// ---------------------------------------
+    // |Prepara o tópico da Temperatura do Solo| 
+    /// ---------------------------------------
+    // Determine o tamanho necessário para a string resultante
+    int tsSize = macAddress.length() + strlen(sts) + 1; // +1 para o caractere nulo
+    // Aloque memória para a string resultante
+    char* ts = new char[tsSize];
+    // Copie o endereço MAC e a parte "/sensorTemperaturaSolo" para a string ts
+    strcpy(ts, macAddress.c_str());
+    strcat(ts, sts);
+
+    /// ------------------------------------
+    // |Faz as publicações, e printa na tela| 
+    /// ------------------------------------
+
+    printLocalTime();
+    client.publish(ta, tempArString);
+    client.publish(ha, humArString);
+    client.publish(ts, tempSoloString);
+    Serial.print(ta);
+    Serial.print("/");
+    Serial.println(tempArString);
+    Serial.print(ha);
+    Serial.print("/");
+    Serial.println(humArString);
+    Serial.print(ts);
+    Serial.print("/");
+    Serial.println(tempSoloString);
+
+  } else if  (min % 2 != 0) {
+    executedThisMinute = false;  // Redefina a variável para permitir a execução no próximo minuto par
   }
 }
