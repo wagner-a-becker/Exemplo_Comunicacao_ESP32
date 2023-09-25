@@ -73,6 +73,8 @@ emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
 #define UTC_OFFSET_DST 0
 #define sensorAgua 25
 #define sensorNutrientes 26
+#define sensorHumidadeSolo 34
+#define sensorLuminosidade 35
 
 DHT dht(DHTPIN, DHTTYPE);
 const int oneWireBus = 13;
@@ -82,6 +84,7 @@ String macAddress;
 bool isConnected = false;
 unsigned long lastMacPublishTime = 0;
 const unsigned long macPublishInterval = 5000;
+float _moisture,sensor_analog,luminosity;
 
 
 void setup() {
@@ -99,6 +102,8 @@ void setup() {
   macAddress = WiFi.macAddress();
   pinMode(sensorAgua, INPUT);
   pinMode(sensorNutrientes, INPUT);
+  pinMode(sensorHumidadeSolo, INPUT);
+  pinMode(sensorLuminosidade,INPUT);
 }
 
 void setup_wifi() {
@@ -169,7 +174,7 @@ bool publishMacAddress() {
   return client.publish("CONFIG/Connect", macAddress.c_str());
 }
 
-void publishLocalTime() {
+/*void publishLocalTime() {
   struct tm timeinfo;
   if (!getLocalTime(&timeinfo)) {
     Serial.println("Connection Error");
@@ -189,7 +194,7 @@ void publishLocalTime() {
     timeinfo.tm_mday, timeinfo.tm_mon + 1, timeinfo.tm_year + 1900, 
     timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
 }
-
+*/
 void publishSensorData(const char* sensorName, float value) {
   struct tm timeinfo;
   if (!getLocalTime(&timeinfo)) {
@@ -205,7 +210,7 @@ void publishSensorData(const char* sensorName, float value) {
   char topic[50];
   snprintf(topic, sizeof(topic), "esp32/%s/%s", macAddress.c_str(), sensorName);
   
-  char data[27];
+  char data[28];
   snprintf(data, sizeof(data), "%s/%.2f", dataHora, value);
   
   client.publish(topic, data);
@@ -230,7 +235,7 @@ void publishString(const char* sensorName, char* value) {
   char topic[50];
   snprintf(topic, sizeof(topic), "esp32/%s/%s", macAddress.c_str(), sensorName);
   
-  char data[27];
+  char data[50];
   snprintf(data, sizeof(data), "%s/%s", dataHora, value);
   
   client.publish(topic, data);
@@ -245,24 +250,48 @@ void publishDHT22() {
   float temperature = dht.readTemperature();
 
   if (!isnan(humidity) && !isnan(temperature)) {
-    publishSensorData("sensorHumidadeAr", humidity);
-    publishSensorData("sensorTemperaturaAr", temperature);
+    publishSensorData("AirHumidity", humidity);
+    publishSensorData("RmTemperature", temperature);
   } else {
-    Serial.println("Failed to read DHT22 data");
+    publishString("alert", "Failed to read DHT22 data");
   }
 }
 
 void publishBS18B20() {
   sensors.requestTemperatures();
   float soilTemperature = sensors.getTempCByIndex(0);
-  publishSensorData("sensorTemperaturaSolo", soilTemperature);
+  publishSensorData("SilTemperature", soilTemperature);
 }
+
+void publishSoilHumidity() {
+  sensor_analog = analogRead(sensorHumidadeSolo);
+  _moisture = ( 100 - ( (sensor_analog/4095.00) * 100 ) );
+  publishSensorData("SilHumidity", _moisture);
+}
+
+void publishPH() {
+  
+}
+
+void publishLuminosity() {
+  luminosity = analogRead(sensorLuminosidade);
+  if (luminosity <= 200){
+    publishString("Luminosity", "Boa");
+  }
+  if (luminosity <= 500 && luminosity > 200){
+    publishString("Luminosity", "Média");
+  }
+  if (luminosity <= 1024 && luminosity > 500){
+    publishString("Luminosity", "Ruim");
+  }
+}
+
 
 void publishAgua() {
   int agua = digitalRead(sensorAgua);  // Leitura da boia de água
 
   if (agua == LOW) { // Se o nível de água estiver baixo (LOW), publique
-    publishString("sensorAgua", "Baixo");  
+    publishString("WaterLevel", "Baixo");  
   }
 }
 
@@ -270,7 +299,7 @@ void publishNutrientes() {
   int nutrientes = digitalRead(sensorNutrientes);  // Leitura da boia de nutrientes
 
   if (nutrientes == LOW) { // Se o nível de nutrientes estiver baixo (LOW), publique
-    publishString("sensorNutrientes", "Baixo");
+    publishString("NutrientLevel", "Baixo");
   }
 }
 
@@ -301,11 +330,14 @@ void loop() {
     if (min % 2 == 0 && !executedThisMinute) {
       executedThisMinute = true;
 
-      publishLocalTime();
+      //publishLocalTime();
       publishDHT22();
       publishBS18B20();
       publishNutrientes();
       publishAgua();
+      publishPH();
+      publishSoilHumidity();
+      publishLuminosity();
       
     } else if  (min % 2 != 0) {
       executedThisMinute = false;  // Redefina a variável para permitir a execução no próximo minuto par
@@ -314,6 +346,7 @@ void loop() {
     // Verifique se a conexão MQTT foi perdida ou o Wi-Fi desconectado
     if (!client.connected() || WiFi.status() != WL_CONNECTED) {
       isConnected = false; // Defina o estado de conexão como false
+      publishString("alert", "Conexão MQTT ou Wi-Fi perdida. Reconectando...");
       Serial.println("Conexão MQTT ou Wi-Fi perdida. Reconectando...");
     }
   }
