@@ -71,6 +71,8 @@ emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
 #define NTP_SERVER     "pool.ntp.org"
 #define UTC_OFFSET     -10800
 #define UTC_OFFSET_DST 0
+#define sensorAgua 25
+#define sensorNutrientes 26
 
 DHT dht(DHTPIN, DHTTYPE);
 const int oneWireBus = 13;
@@ -95,6 +97,8 @@ void setup() {
   dht.begin();
   configTime(UTC_OFFSET, UTC_OFFSET_DST, NTP_SERVER);
   macAddress = WiFi.macAddress();
+  pinMode(sensorAgua, INPUT);
+  pinMode(sensorNutrientes, INPUT);
 }
 
 void setup_wifi() {
@@ -130,12 +134,9 @@ void callback(char* topic, byte* message, unsigned int length) {
   }
   Serial.println();
   snprintf(connectTopic, sizeof(connectTopic), "%s/CONFIG/Connected", macAddress.c_str());
-  if (String(topic) == connectTopic) {
-    Serial.print("Changing output to ");
-    if(messageTemp == "yes"){
+  if (String(topic) == connectTopic && messageTemp == "yes") {
       Serial.println("Connected to API");
       isConnected = true;
-    }
   }
 }
 
@@ -214,6 +215,31 @@ void publishSensorData(const char* sensorName, float value) {
   Serial.println(data);
 }
 
+void publishString(const char* sensorName, char* value) {
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    Serial.println("Connection Error");
+    return;
+  }
+
+  char dataHora[20];
+  snprintf(dataHora, sizeof(dataHora), "%02d/%02d/%04d %02d:%02d:%02d", 
+    timeinfo.tm_mday, timeinfo.tm_mon + 1, timeinfo.tm_year + 1900, 
+    timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+
+  char topic[50];
+  snprintf(topic, sizeof(topic), "esp32/%s/%s", macAddress.c_str(), sensorName);
+  
+  char data[27];
+  snprintf(data, sizeof(data), "%s/%s", dataHora, value);
+  
+  client.publish(topic, data);
+  
+  Serial.print(topic);
+  Serial.print("/");
+  Serial.println(data);
+}
+
 void publishDHT22() {
   float humidity = dht.readHumidity();
   float temperature = dht.readTemperature();
@@ -230,6 +256,22 @@ void publishBS18B20() {
   sensors.requestTemperatures();
   float soilTemperature = sensors.getTempCByIndex(0);
   publishSensorData("sensorTemperaturaSolo", soilTemperature);
+}
+
+void publishAgua() {
+  int agua = digitalRead(sensorAgua);  // Leitura da boia de água
+
+  if (agua == LOW) { // Se o nível de água estiver baixo (LOW), publique
+    publishString("sensorAgua", "Baixo");  
+  }
+}
+
+void publishNutrientes() {
+  int nutrientes = digitalRead(sensorNutrientes);  // Leitura da boia de nutrientes
+
+  if (nutrientes == LOW) { // Se o nível de nutrientes estiver baixo (LOW), publique
+    publishString("sensorNutrientes", "Baixo");
+  }
 }
 
 
@@ -262,6 +304,8 @@ void loop() {
       publishLocalTime();
       publishDHT22();
       publishBS18B20();
+      publishNutrientes();
+      publishAgua();
       
     } else if  (min % 2 != 0) {
       executedThisMinute = false;  // Redefina a variável para permitir a execução no próximo minuto par
