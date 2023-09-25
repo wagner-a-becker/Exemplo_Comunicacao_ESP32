@@ -99,7 +99,7 @@ void setup() {
 
 void setup_wifi() {
   WiFi.mode(WIFI_STA); //Optional
-    WiFi.begin("Wokwi-GUEST", "", 6);
+    WiFi.begin(ssid, password);
     Serial.println("\nConnecting");
     int timeout_counter = 0;
 
@@ -122,16 +122,15 @@ void callback(char* topic, byte* message, unsigned int length) {
   Serial.print(topic);
   Serial.print(". Message: ");
   String messageTemp;
+  char connectTopic[50];
   
   for (int i = 0; i < length; i++) {
     Serial.print((char)message[i]);
     messageTemp += (char)message[i];
   }
   Serial.println();
-  // Feel free to add more if statements to control more GPIOs with MQTT
-  // If a message is received on the topic esp32/output, you check if the message is either "on" or "off". 
-  // Changes the output state according to the message
-  if (String(topic) == "CONFIG/Connected") {
+  snprintf(connectTopic, sizeof(connectTopic), "%s/CONFIG/Connected", macAddress.c_str());
+  if (String(topic) == connectTopic) {
     Serial.print("Changing output to ");
     if(messageTemp == "yes"){
       Serial.println("Connected to API");
@@ -142,16 +141,17 @@ void callback(char* topic, byte* message, unsigned int length) {
 
 void reconnect() {
   // Loop until we're reconnected
+  char connectTopic[50];
   while (!client.connected()) {
     Serial.print("Attempting MQTT connection...");
-    String clientId = "ESP32Wag-";   // Create a random client ID
+    String clientId = macAddress;   // Create a random client ID
     clientId += String(random(0xffff), HEX);
     // Attempt to connect
     if (client.connect(clientId.c_str(), mqtt_username, mqtt_password)) {
       Serial.println("connected");
 
-      //SUBSCRIBE TO TOPIC HERE
-      client.subscribe("CONFIG/Connected");
+      snprintf(connectTopic, sizeof(connectTopic), "%s/CONFIG/Connected", macAddress.c_str());
+      client.subscribe(connectTopic);
      
 
     } else {
@@ -190,11 +190,22 @@ void publishLocalTime() {
 }
 
 void publishSensorData(const char* sensorName, float value) {
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    Serial.println("Connection Error");
+    return;
+  }
+
+  char dataHora[20];
+  snprintf(dataHora, sizeof(dataHora), "%02d/%02d/%04d %02d:%02d:%02d", 
+    timeinfo.tm_mday, timeinfo.tm_mon + 1, timeinfo.tm_year + 1900, 
+    timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+
   char topic[50];
-  snprintf(topic, sizeof(topic), "%s/%s", macAddress.c_str(), sensorName);
+  snprintf(topic, sizeof(topic), "esp32/%s/%s", macAddress.c_str(), sensorName);
   
-  char data[8];
-  snprintf(data, sizeof(data), "%.2f", value);
+  char data[27];
+  snprintf(data, sizeof(data), "%s/%.2f", dataHora, value);
   
   client.publish(topic, data);
   
