@@ -13,8 +13,8 @@
 
 
 // Replace the next variables with your SSID/Password combination
-const char* ssid = "Galaxy A14";
-const char* password = "aaabbbzzz";
+const char* ssid = "Rede Wagner";
+const char* password = "1+1Rede1+1";
 
 // Add your MQTT Broker IP address, example:
 //const char* mqtt_server = "192.168.1.144";
@@ -74,14 +74,14 @@ emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
 #define UTC_OFFSET_DST 0
 #define sensorAgua 26
 #define sensorNutrientes 27
-#define sensorHumidadeSolo 33
+#define sensorHumidadeSolo 39
 #define sensorLuminosidade 32
-#define sensorPH 36
+#define sensorPH 33
 #define VERIFICA 0
 #define LIGA_BOMBA 1
 #define ESPERA_TEMPO 2
-#define bombaNutrientes 12
-#define bombaAgua 14
+#define bombaNutrientes 25
+#define bombaAgua 13
 
 DHT dht(DHTPIN, DHTTYPE);
 const int oneWireBus = 2;
@@ -123,8 +123,8 @@ void setup() {
   dht.begin();
   configTime(UTC_OFFSET, UTC_OFFSET_DST, NTP_SERVER);
   macAddress = WiFi.macAddress();
-  pinMode(sensorAgua, INPUT);
-  pinMode(sensorNutrientes, INPUT);
+  pinMode(sensorAgua, INPUT_PULLUP);
+  pinMode(sensorNutrientes, INPUT_PULLUP);
   pinMode(sensorHumidadeSolo, INPUT);
   pinMode(sensorLuminosidade, INPUT);
   pinMode(sensorPH, INPUT);
@@ -225,7 +225,7 @@ bool publishMacAddress() {
   char topic[100];
   char data[100];
   snprintf(topic, sizeof(topic), "CONFIG/Connect/%s", macAddress.c_str());
-  snprintf(data, sizeof(data), "%s", ssid, cpf);
+  snprintf(data, sizeof(data), "%s/%s", ssid, cpf);
   return client.publish(topic, data);
 }
 
@@ -310,10 +310,33 @@ float calcSoilHumidity() {
 }
 
 void publishPH() {
-  float analogPH = analogRead(sensorPH);
-  float calibration_value = 20.24 - 0.7; //21.34 - 0.7
-  float volt = (float)analogPH * 3.3 / 4096.0;
+  float calibration_value = 8.3;
+  unsigned long int avgval; 
+  int buffer_arr[10],temp;
+  
+  for(int i=0;i<10;i++) 
+  { 
+  buffer_arr[i]=analogRead(35);
+  delay(30);
+  }
+ for(int i=0;i<9;i++)
+ {
+  for(int j=i+1;j<10;j++)
+  {
+    if(buffer_arr[i]>buffer_arr[j])
+    {
+      temp=buffer_arr[i];
+      buffer_arr[i]=buffer_arr[j];
+      buffer_arr[j]=temp;
+    }
+  }
+ }
+ avgval=0;
+ for(int i=2;i<8;i++)
+ avgval+=buffer_arr[i];
+  float volt=(float)avgval*3.3/4096.0/6;
   float ph_act = -5.70 * volt + calibration_value;
+  
 
   publishSensorData("PH", ph_act);
 }
@@ -326,10 +349,10 @@ void publishLuminosity() {
 
 
 void publishAgua() {
-  float agua = digitalRead(sensorAgua);  // Leitura da boia de água
+  int agua = digitalRead(sensorAgua);  // Leitura da boia de água
 
   if (agua == LOW) { // Se o nível de água estiver baixo (LOW), publique
-    publishSensorData("WaterLevel", agua);  
+    publishString("WaterLevel", "0");  
   }
 }
 
@@ -337,7 +360,7 @@ void publishNutrientes() {
   float nutrientes = digitalRead(sensorNutrientes);  // Leitura da boia de nutrientes
 
   if (nutrientes == LOW) { // Se o nível de nutrientes estiver baixo (LOW), publique
-    publishSensorData("NutrientLevel", nutrientes);
+    publishString("NutrientLevel", "0");
   }
 }
 
@@ -354,6 +377,7 @@ void stateAgua() {
         // Se a umidade estiver abaixo do limite, ligue a bomba
         digitalWrite(bombaAgua, HIGH);
         Serial.println("Bomba Agua Ligada");
+        publishString("alert", "Bomba de Água Ligada");
         state = LIGA_BOMBA;
       }
       break;
@@ -407,6 +431,7 @@ void stateNutrientes() {
     if (hoursElapsed >= rcpNutrient) {
       // É hora de adicionar nutrientes, ative as bombas de nutrientes
       Serial.println("Bomba ativada");
+      publishString("alert", "Bomba de Nutrientes Ligada");
 
       // Atualize o dia e a hora da última ativação
       lastActivationDay = currentTime.tm_mday;
